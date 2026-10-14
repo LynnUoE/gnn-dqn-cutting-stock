@@ -1,0 +1,19 @@
+[project]
+name = "csp-gnn-dqn"
+version = "0.1.0"
+description = "Reproduction of 'Sustainable Material Cutting Optimization Using Deep Q-Networks' (ITM Web Conf. 73, 01002, 2025)"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "torch-geometric>=2.5",
+    "numpy",
+    "pillow",
+    "matplotlib",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
