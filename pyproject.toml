@@ -1,7 +1,7 @@
 [project]
 name = "csp-gnn-dqn"
 version = "0.1.0"
-description = "Reproduction of 'Sustainable Material Cutting Optimization Using Deep Q-Networks' (ITM Web Conf. 73, 01002, 2025)"
+description = "Code for 'Sustainable Material Cutting Optimization Using Deep Q-Networks' (ITM Web Conf. 73, 01002, 2025), re-implemented after the original code was lost"
 requires-python = ">=3.10"
 dependencies = [
     "torch>=2.2",

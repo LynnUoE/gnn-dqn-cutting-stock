@@ -68,7 +68,7 @@ def loss_curve(values: Sequence[float], title: str, path: Path, paper_key: str |
     reference = PAPER.get(paper_key or "")
     if reference and len(reference) == len(values):
         ax.plot(epochs, reference, color=REFERENCE, linewidth=1.5, label="Paper (read off the figure)")
-        _line(ax, epochs, values, BLUE, label="Reproduction")
+        _line(ax, epochs, values, BLUE, label="Reimplementation")
         _legend(ax, loc="upper right")
     else:
         _line(ax, epochs, values, BLUE)
@@ -101,7 +101,7 @@ def reward_and_epsilon(rewards: Sequence[float], epsilons: Sequence[float], path
     reference = PAPER["fig6_epsilon"]
     if len(rewards) == 100:
         bottom.plot(marks, reference, color=REFERENCE, linewidth=1.5, label="Paper (read off the figure)")
-        _line(bottom, marks, epsilons[marks], ORANGE, label="Reproduction")
+        _line(bottom, marks, epsilons[marks], ORANGE, label="Reimplementation")
         _legend(bottom, loc="upper right")
     else:
         bottom.plot(episodes, epsilons, color=ORANGE, linewidth=2)

@@ -1,4 +1,4 @@
-"""Run the whole reproduction.
+"""Run all experiments of the paper.
 
 Fig. 3-6 are produced with the protocol of the paper (20 epochs, 100 episodes).
 `--extended` goes beyond the paper with two 40 000-episode runs: the DQN exactly
