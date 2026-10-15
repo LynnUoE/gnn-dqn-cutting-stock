@@ -15,12 +15,14 @@ from .data import TextureGraphs, load_kth_tips
 from .gnn import TextureGCN
 
 
-def make_loaders(dataset: TextureGraphs, batch_size: int, seed: int) -> tuple[DataLoader, DataLoader]:
+def make_loaders(dataset: TextureGraphs, batch_size: int, seed: int) -> tuple[DataLoader, DataLoader, DataLoader]:
+    """Shuffled training batches, plus the training and test sets for evaluation."""
     generator = torch.Generator().manual_seed(seed)
-    train = DataLoader([dataset.graphs[i] for i in dataset.train_idx], batch_size=batch_size, shuffle=True,
-                       generator=generator)
+    train_graphs = [dataset.graphs[i] for i in dataset.train_idx]
+    train = DataLoader(train_graphs, batch_size=batch_size, shuffle=True, generator=generator)
+    train_eval = DataLoader(train_graphs, batch_size=256)
     test = DataLoader([dataset.graphs[i] for i in dataset.test_idx], batch_size=256)
-    return train, test
+    return train, train_eval, test
 
 
 @torch.no_grad()
@@ -37,6 +39,7 @@ def evaluate(model: TextureGCN, loader: DataLoader) -> tuple[float, float]:
 
 
 def train_epoch(model: TextureGCN, loader: DataLoader, optimizer: torch.optim.Optimizer) -> float:
+    """One pass over the training batches; returns the running mean of the batch losses."""
     model.train()
     loss_sum = count = 0
     for batch in loader:
@@ -58,20 +61,26 @@ def run(
     hidden_dim: int = 64,
     features: str = "lbp",
     seed: int = 0,
+    dataset: TextureGraphs | None = None,
 ) -> dict:
+    """Train and evaluate the GNN; `dataset` skips reloading KTH-TIPS (it must use `features`)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(seed)
-    dataset = load_kth_tips(data_dir, features=features, seed=seed)
-    train_loader, test_loader = make_loaders(dataset, batch_size, seed)
+    if dataset is None:
+        dataset = load_kth_tips(data_dir, features=features)
+    train_loader, train_eval_loader, test_loader = make_loaders(dataset, batch_size, seed)
     model = TextureGCN(dataset.num_features, hidden_dim, hidden_dim, len(dataset.classes))
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    history = {"train_loss": [], "test_loss": [], "test_acc": []}
+    # train and test loss are both measured with the model at the end of the epoch
+    history = {"train_loss": [], "train_loss_running": [], "test_loss": [], "test_acc": []}
     for epoch in range(1, epochs + 1):
-        train_loss = train_epoch(model, train_loader, optimizer)
+        running = train_epoch(model, train_loader, optimizer)
+        train_loss, _ = evaluate(model, train_eval_loader)
         test_loss, test_acc = evaluate(model, test_loader)
         history["train_loss"].append(train_loss)
+        history["train_loss_running"].append(running)
         history["test_loss"].append(test_loss)
         history["test_acc"].append(test_acc)
         print(f"[gnn] epoch {epoch:2d}  train loss {train_loss:.3f}  test loss {test_loss:.3f}  "

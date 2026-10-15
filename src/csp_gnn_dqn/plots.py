@@ -17,6 +17,7 @@ INK_MUTED = "#52514e"
 GRID = "#e4e3df"
 BLUE = "#2a78d6"
 ORANGE = "#eb6834"
+AQUA = "#1baf7a"
 REFERENCE = "#8a8983"
 
 # Curves of the paper, read off its figures by eye (approximate, for comparison only).
@@ -79,28 +80,29 @@ def loss_curve(values: Sequence[float], title: str, path: Path, paper_key: str |
 def reward_and_epsilon(rewards: Sequence[float], epsilons: Sequence[float], path: Path):
     """Fig. 6. Reward and epsilon share the episode axis but get one panel each.
 
-    The paper plots every 10th of its 100 episodes; longer runs are summarised
-    by the mean of ten equal blocks instead.
+    With the paper's 100 episodes every 10th episode is marked, as in the
+    paper; other run lengths are summarised by the mean of each tenth of the run.
     """
     rewards, epsilons = np.asarray(rewards), np.asarray(epsilons)
-    episodes = np.arange(len(rewards))
-    every = max(1, len(rewards) // 10)
-    marks = episodes[::every]
+    n = len(rewards)
+    episodes = np.arange(n)
+    paper_protocol = n == 100  # the run length of the paper
     fig, (top, bottom) = plt.subplots(2, 1, figsize=(7, 6), sharex=True, facecolor=SURFACE,
                                       gridspec_kw={"height_ratios": [3, 2], "hspace": 0.28})
     _axes(top, "Total reward per episode", "", "Total reward", title_pad=30)
     top.plot(episodes, rewards, color=BLUE, linewidth=1, alpha=0.35, label="Every episode")
-    if len(rewards) <= 100:
-        _line(top, marks, rewards[marks], BLUE, label=f"Every {every}th episode (as plotted in the paper)")
-    else:
-        blocks = rewards[: every * 10].reshape(10, every).mean(axis=1)
-        _line(top, marks + every / 2, blocks, BLUE, label=f"Mean of each {every}-episode block")
+    if paper_protocol:
+        marks = episodes[::10]
+        _line(top, marks, rewards[marks], BLUE, label="Every 10th episode (as plotted in the paper)")
+    elif n >= 10:
+        edges = np.linspace(0, n, 11).astype(int)
+        means = [rewards[a:b].mean() for a, b in zip(edges[:-1], edges[1:])]
+        _line(top, (edges[:-1] + edges[1:] - 1) / 2, means, BLUE, label="Mean of each tenth of the run")
     _legend(top, loc="lower left", bbox_to_anchor=(0, 1.0), ncols=2, borderaxespad=0.2, handlelength=1.6)
 
     _axes(bottom, "Epsilon", "Episode", "Epsilon")
-    reference = PAPER["fig6_epsilon"]
-    if len(rewards) == 100:
-        bottom.plot(marks, reference, color=REFERENCE, linewidth=1.5, label="Paper (read off the figure)")
+    if paper_protocol:
+        bottom.plot(marks, PAPER["fig6_epsilon"], color=REFERENCE, linewidth=1.5, label="Paper (read off the figure)")
         _line(bottom, marks, epsilons[marks], ORANGE, label="Reimplementation")
         _legend(bottom, loc="upper right")
     else:
@@ -118,7 +120,7 @@ def utilization_curve(series: dict[str, Sequence[float]], baselines: dict[str, f
         ax.axhline(100 * value, color=REFERENCE, linewidth=1.5)
         ax.annotate(f"{name} {100 * value:.0f}%", (1.015, 100 * value), xycoords=("axes fraction", "data"),
                     va="center", color=INK_MUTED, fontsize=9)
-    for color, (name, values) in zip((BLUE, ORANGE), series.items()):
+    for color, (name, values) in zip((BLUE, ORANGE, AQUA), series.items()):
         x = np.arange(1, len(values) + 1) * episodes_per_epoch
         _line(ax, x, 100 * np.asarray(values), color, label=f"{name}: {100 * values[-1]:.0f}% after {x[-1]:,} episodes")
     _legend(ax, loc="lower left", bbox_to_anchor=(0, 1.0), borderaxespad=0.2, handlelength=1.6)

@@ -15,6 +15,9 @@ class QNetwork(nn.Module):
 
     def __init__(self, embed_dim: int, feature_dim: int, n_actions: int = 100):
         super().__init__()
+        # v_G is an unbounded output of the GNN whose scale grows as the GNN trains;
+        # normalising it keeps it comparable to f_C, whose entries lie in [0, 1]
+        self.norm = nn.LayerNorm(embed_dim, elementwise_affine=False)
         self.net = nn.Sequential(
             nn.Linear(embed_dim + feature_dim, 128),
             nn.ReLU(),
@@ -24,7 +27,7 @@ class QNetwork(nn.Module):
         )
 
     def forward(self, v_g: torch.Tensor, f_c: torch.Tensor) -> torch.Tensor:
-        return self.net(torch.cat([v_g, f_c], dim=-1))
+        return self.net(torch.cat([self.norm(v_g), f_c], dim=-1))
 
     @torch.no_grad()
     def greedy_action(self, v_g: torch.Tensor, f_c: np.ndarray, mask: np.ndarray | None = None) -> int:
@@ -86,15 +89,15 @@ class ReplayBuffer:
             self.graph_id, self.f_c, self.action, self.reward, self.next_f_c, self.done, self.next_mask)))
 
 
-def td_loss(q_net: QNetwork, target_net: QNetwork, v_g: torch.Tensor, batch: Transitions, gamma: float,
+def td_loss(q_net: QNetwork, target_net: QNetwork, v: torch.Tensor, batch: Transitions, gamma: float,
             double_dqn: bool = False) -> torch.Tensor:
     """Eq. (6): E[(r + gamma * max_a' Q(s', a'; theta^-) - Q(s, a; theta))^2].
 
-    `v_g` holds the embedding of every material graph. `batch.next_mask` is all
-    True unless invalid-action masking is used. With `double_dqn` the online
+    `v` is the material embedding v_G of each transition; when it carries
+    gradients, the loss also trains the GNN. `batch.next_mask` is all True
+    unless invalid-action masking is used. With `double_dqn` the online
     network selects a' and the target network evaluates it (van Hasselt et al.).
     """
-    v = v_g[batch.graph_id]
     q = q_net(v, batch.f_c).gather(1, batch.action.unsqueeze(1)).squeeze(1)
     with torch.no_grad():
         next_q = target_net(v, batch.next_f_c).masked_fill(~batch.next_mask, -torch.inf)
@@ -103,5 +106,7 @@ def td_loss(q_net: QNetwork, target_net: QNetwork, v_g: torch.Tensor, batch: Tra
             next_q = next_q.gather(1, best).squeeze(1)
         else:
             next_q = next_q.max(dim=1).values
-        y = batch.reward + gamma * (1.0 - batch.done) * next_q
+        # terminal states have no feasible action; zero them explicitly instead of 0 * -inf = nan
+        next_q = torch.where(batch.done.bool(), torch.zeros_like(next_q), next_q)
+        y = batch.reward + gamma * next_q
     return F.mse_loss(q, y)

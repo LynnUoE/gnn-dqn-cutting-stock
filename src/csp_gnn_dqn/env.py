@@ -11,7 +11,8 @@ specify the stock, the orders or the reward. The choices made here:
 * Action: put the lower-left corner of the current piece at (x, y), rotated by theta.
 * Reward: the placed area as a fraction of the sheet, so the return of an
   episode is its material utilisation; an infeasible cut costs one cell and
-  the piece is discarded.
+  the piece is discarded. A piece that fits nowhere on the remaining sheet is
+  set aside without asking the agent, since no decision can place it.
 * Material: directional fabrics have a grain, so their pieces may not be
   rotated. This is the only place where the texture class enters the dynamics
   and is what makes the graph embedding v_G informative for the agent.
@@ -23,7 +24,6 @@ import numpy as np
 
 ORIENTATIONS = (0, 90)
 GRAINED_MATERIALS = frozenset({"corduroy", "cotton", "linen"})
-MAX_CUTS = 20  # normaliser for the "cuts already made" feature
 
 
 class CuttingStockEnv:
@@ -55,21 +55,23 @@ class CuttingStockEnv:
         self.pieces = self._generate_order()
         self.cursor = 0
         self.cuts = 0
+        self._skip_unplaceable()
         return self.features()
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, dict]:
-        x, y, theta = self.decode(action)
-        w, h = self.pieces[self.cursor]
-        if theta == 90:
-            w, h = h, w
-        valid = (theta == 0 or not self.grained) and self._fits(x, y, w, h)
+        valid = bool(self.valid_actions()[action])
         if valid:
+            x, y, theta = self.decode(action)
+            w, h = self.pieces[self.cursor]
+            if theta == 90:
+                w, h = h, w
             self.occupied[y : y + h, x : x + w] = True
             self.cuts += 1
             reward = w * h / self.area
         else:
             reward = -self.invalid_penalty
         self.cursor += 1
+        self._skip_unplaceable()
         done = self.cursor >= len(self.pieces)
         return self.features(), reward, done, {"valid": valid, "utilization": self.utilization}
 
@@ -79,7 +81,7 @@ class CuttingStockEnv:
         w, h = self.pieces[self.cursor] if self.cursor < len(self.pieces) else (0, 0)
         head = [
             1.0 - self.utilization,
-            self.cuts / MAX_CUTS,
+            self.cuts / self.area,
             w / self.max_piece_side,
             h / self.max_piece_side,
         ]
@@ -99,7 +101,7 @@ class CuttingStockEnv:
         return ORIENTATIONS.index(theta) * self.area + y * self.width + x
 
     def valid_actions(self) -> np.ndarray:
-        """Feasibility mask over the 100 actions; all True if the current piece fits nowhere."""
+        """Feasibility mask over the 100 actions for the current piece (all False once the order is done)."""
         mask = np.zeros((len(ORIENTATIONS), self.height, self.width), dtype=bool)
         if self.cursor < len(self.pieces):
             w, h = self.pieces[self.cursor]
@@ -110,8 +112,7 @@ class CuttingStockEnv:
                     continue
                 covered = integral[ph:, pw:] - integral[:-ph, pw:] - integral[ph:, :-pw] + integral[:-ph, :-pw]
                 mask[i, : self.height - ph + 1, : self.width - pw + 1] = covered == 0
-        mask = mask.ravel()
-        return mask if mask.any() else np.ones_like(mask)
+        return mask.ravel()
 
     def first_fit_action(self) -> int:
         """Baseline heuristic: first free position in row-major order, unrotated first."""
@@ -119,10 +120,9 @@ class CuttingStockEnv:
         return int(min(valid, key=lambda a: (a % self.area, a // self.area)))
 
     # ------------------------------------------------------------------ helpers
-    def _fits(self, x: int, y: int, w: int, h: int) -> bool:
-        if x + w > self.width or y + h > self.height:
-            return False
-        return not self.occupied[y : y + h, x : x + w].any()
+    def _skip_unplaceable(self):
+        while self.cursor < len(self.pieces) and not self.valid_actions().any():
+            self.cursor += 1
 
     def _generate_order(self) -> list[tuple[int, int]]:
         todo = [(self.width, self.height)]

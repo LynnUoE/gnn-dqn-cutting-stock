@@ -8,6 +8,7 @@ grayscale pixels of the patch can be appended with `features="lbp+gray"`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ GRID = IMAGE_SIZE // PATCH_SIZE  # 8x8 = 64 nodes per image
 LBP_POINTS = 8
 LBP_RADIUS = 1.0
 LBP_BINS = LBP_POINTS + 2  # rotation-invariant uniform patterns
+SCALE_PATTERN = re.compile(r"scale_(\d+)")
 
 
 def load_gray(path: Path) -> np.ndarray:
@@ -108,27 +110,29 @@ class TextureGraphs:
 def load_kth_tips(
     data_dir: str | Path,
     features: str = "lbp",
-    test_fraction: float = 0.2,
-    seed: int = 0,
+    test_scales: tuple[int, ...] = (3, 7),
 ) -> TextureGraphs:
-    """Build one graph per image and a stratified train/test split."""
+    """Build one graph per image; the images taken at `test_scales` form the test set.
+
+    Each KTH-TIPS class is a single physical sample photographed at 9 scales
+    under 3 poses x 3 illuminations, so a random split would put near-identical
+    photos into both sets. Holding out whole scales measures generalisation to
+    scales that were not seen in training.
+    """
     data_dir = Path(data_dir)
     classes = sorted(p.name for p in data_dir.iterdir() if p.is_dir())
     if not classes:
         raise FileNotFoundError(f"no class folders found in {data_dir}")
     edge_index = grid_edge_index()
-    rng = np.random.default_rng(seed)
     graphs: list[Data] = []
     train_idx: list[int] = []
     test_idx: list[int] = []
     for label, name in enumerate(classes):
-        paths = sorted((data_dir / name).glob("*.png"))
-        start = len(graphs)
-        for path in paths:
+        for path in sorted((data_dir / name).glob("*.png")):
+            match = SCALE_PATTERN.search(path.name)
+            if match is None:
+                raise ValueError(f"cannot read the scale from {path.name}")
+            (test_idx if int(match.group(1)) in test_scales else train_idx).append(len(graphs))
             x = torch.from_numpy(node_features(load_gray(path), features))
             graphs.append(Data(x=x, edge_index=edge_index, y=torch.tensor([label])))
-        order = start + rng.permutation(len(paths))
-        n_test = round(len(paths) * test_fraction)
-        test_idx.extend(order[:n_test].tolist())
-        train_idx.extend(order[n_test:].tolist())
-    return TextureGraphs(graphs, classes, np.array(sorted(train_idx)), np.array(sorted(test_idx)))
+    return TextureGraphs(graphs, classes, np.array(train_idx), np.array(test_idx))
